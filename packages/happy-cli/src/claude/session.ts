@@ -4,8 +4,6 @@ import { EnhancedMode } from "./loop";
 import { logger } from "@/ui/logger";
 import type { JsRuntime } from "./runClaude";
 import type { SandboxConfig } from "@/persistence";
-import type { SDKMessage } from "@/claude/sdk";
-import type { PermissionHandler } from "@/claude/utils/permissionHandler";
 
 export class Session {
     readonly path: string;
@@ -24,16 +22,6 @@ export class Session {
     readonly hookSettingsPath: string;
     /** JavaScript runtime to use for spawning Claude Code (default: 'node') */
     readonly jsRuntime: JsRuntime;
-    /** Optional tap for observing raw SDK messages (used by the ACP agent) */
-    readonly onAgentSdkMessage?: (message: SDKMessage) => void;
-    /** Optional tap for observing permission requests (used by the ACP agent) */
-    readonly onPermissionRequest?: (req: { id: string; toolName: string; input: unknown }) => void;
-    /** Optional tap for observing permission resolutions (used by the ACP agent) */
-    readonly onPermissionResolved?: (id: string) => void;
-    /** Optional tap exposing the PermissionHandler once the launcher creates it (used by the ACP agent to resolve requests externally) */
-    readonly onPermissionHandlerReady?: (handler: PermissionHandler) => void;
-    /** Optional tap exposing the launcher's abort function once wired (used by the ACP agent to interrupt a running turn) */
-    readonly onAbortReady?: (abort: () => void) => void;
 
     sessionId: string | null;
     mode: 'local' | 'remote' = 'local';
@@ -63,11 +51,6 @@ export class Session {
         hookSettingsPath: string,
         /** JavaScript runtime to use for spawning Claude Code (default: 'node') */
         jsRuntime?: JsRuntime,
-        onAgentSdkMessage?: (message: SDKMessage) => void,
-        onPermissionRequest?: (req: { id: string; toolName: string; input: unknown }) => void,
-        onPermissionResolved?: (id: string) => void,
-        onPermissionHandlerReady?: (handler: PermissionHandler) => void,
-        onAbortReady?: (abort: () => void) => void,
     }) {
         this.path = opts.path;
         this.api = opts.api;
@@ -84,11 +67,6 @@ export class Session {
         this._onAbort = opts.onAbort;
         this.hookSettingsPath = opts.hookSettingsPath;
         this.jsRuntime = opts.jsRuntime ?? 'node';
-        this.onAgentSdkMessage = opts.onAgentSdkMessage;
-        this.onPermissionRequest = opts.onPermissionRequest;
-        this.onPermissionResolved = opts.onPermissionResolved;
-        this.onPermissionHandlerReady = opts.onPermissionHandlerReady;
-        this.onAbortReady = opts.onAbortReady;
 
         // Start keep alive
         this.client.keepAlive(this.thinking, this.mode);

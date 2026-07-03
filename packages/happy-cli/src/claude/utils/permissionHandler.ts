@@ -203,7 +203,6 @@ export class PermissionHandler {
             // Set up abort signal handling
             const abortHandler = () => {
                 this.pendingRequests.delete(id);
-                this.session.onPermissionResolved?.(id);
                 reject(new Error('Permission request aborted'));
             };
             signal.addEventListener('abort', abortHandler, { once: true });
@@ -252,9 +251,6 @@ export class PermissionHandler {
                     }
                 }
             }));
-
-            // Notify observers (e.g. ACP agent) that a request is now pending
-            this.session.onPermissionRequest?.({ id, toolName, input });
 
             logger.debug(`Permission request sent for tool call ${id}: ${toolName}`);
         });
@@ -314,9 +310,8 @@ export class PermissionHandler {
         this.permissionMode = 'default';
 
         // Cancel all pending requests
-        for (const [id, pending] of this.pendingRequests.entries()) {
+        for (const [, pending] of this.pendingRequests.entries()) {
             pending.reject(new Error('Session reset'));
-            this.session.onPermissionResolved?.(id);
         }
         this.pendingRequests.clear();
 
@@ -344,78 +339,49 @@ export class PermissionHandler {
     }
 
     /**
-     * Resolves a pending permission request through the single shared code path
-     * used by both the phone `permission` RPC and the ACP editor (`resolveExternally`).
-     *
-     * Returns false if there is no pending request for `id` (first-response-wins).
-     */
-    private resolveRequest(id: string, response: PermissionResponse): boolean {
-        const pending = this.pendingRequests.get(id);
-
-        if (!pending) {
-            return false;
-        }
-
-        // Store the response with timestamp
-        this.responses.set(id, { ...response, receivedAt: Date.now() });
-        this.pendingRequests.delete(id);
-
-        // Handle the permission response based on tool type
-        this.handlePermissionResponse(response, pending);
-
-        // Move processed request to completedRequests
-        this.session.client.updateAgentState((currentState) => {
-            const request = currentState.requests?.[id];
-            if (!request) return currentState;
-            let r = { ...currentState.requests };
-            delete r[id];
-            return {
-                ...currentState,
-                requests: r,
-                completedRequests: {
-                    ...currentState.completedRequests,
-                    [id]: {
-                        ...request,
-                        completedAt: Date.now(),
-                        status: response.approved ? 'approved' : 'denied',
-                        reason: response.reason,
-                        mode: response.mode,
-                        allowTools: response.allowTools
-                    }
-                }
-            };
-        });
-
-        // Notify observers (e.g. ACP agent) that the request has been resolved
-        this.session.onPermissionResolved?.(id);
-
-        return true;
-    }
-
-    /**
-     * Resolves a pending permission request from outside the phone RPC flow
-     * (used by the ACP editor). Routes through the SAME code path as the
-     * `permission` RPC. Returns false if no such pending request exists.
-     */
-    resolveExternally(id: string, response: { approved: boolean; mode?: PermissionMode; allowTools?: string[] }): boolean {
-        return this.resolveRequest(id, {
-            id,
-            approved: response.approved,
-            mode: response.mode,
-            allowTools: response.allowTools
-        } as PermissionResponse);
-    }
-
-    /**
      * Sets up the client handler for permission responses
      */
     private setupClientHandler(): void {
         this.session.client.rpcHandlerManager.registerHandler<PermissionResponse, void>('permission', async (message) => {
             logger.debug(`Permission response: ${JSON.stringify(message)}`);
 
-            if (!this.resolveRequest(message.id, message)) {
+            const id = message.id;
+            const pending = this.pendingRequests.get(id);
+
+            if (!pending) {
                 logger.debug('Permission request not found or already resolved');
+                return;
             }
+
+            // Store the response with timestamp
+            this.responses.set(id, { ...message, receivedAt: Date.now() });
+            this.pendingRequests.delete(id);
+
+            // Handle the permission response based on tool type
+            this.handlePermissionResponse(message, pending);
+
+            // Move processed request to completedRequests
+            this.session.client.updateAgentState((currentState) => {
+                const request = currentState.requests?.[id];
+                if (!request) return currentState;
+                let r = { ...currentState.requests };
+                delete r[id];
+                return {
+                    ...currentState,
+                    requests: r,
+                    completedRequests: {
+                        ...currentState.completedRequests,
+                        [id]: {
+                            ...request,
+                            completedAt: Date.now(),
+                            status: message.approved ? 'approved' : 'denied',
+                            reason: message.reason,
+                            mode: message.mode,
+                            allowTools: message.allowTools
+                        }
+                    }
+                };
+            });
         });
     }
 

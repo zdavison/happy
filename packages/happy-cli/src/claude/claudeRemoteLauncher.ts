@@ -97,16 +97,10 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
     // When to abort
     session.client.rpcHandlerManager.registerHandler('abort', doAbort); // When abort clicked
     session.client.rpcHandlerManager.registerHandler('switch', doSwitch); // When switch clicked
-    // Expose the real interrupt to observers (e.g. the ACP agent) so an editor
-    // `cancel` triggers the same abort path the phone's abort button uses.
-    session.onAbortReady?.(doAbort);
     // Removed catch-all stdin handler - now handled by RemoteModeDisplay keyboard handlers
 
     // Create permission handler
     const permissionHandler = new PermissionHandler(session);
-    // Expose the handler to observers (e.g. the ACP agent) so they can resolve
-    // requests externally through the same resolveExternally path the phone uses.
-    session.onPermissionHandlerReady?.(permissionHandler);
 
     // Drop any permission requests left over in agent state from a
     // previous CLI process that died while a tool prompt was open. The
@@ -141,9 +135,6 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
     let notifiedQuestionToolCalls = new Set<string>();
 
     function onMessage(message: SDKMessage) {
-
-        // Tap for ACP/headless consumers listening for raw SDK messages
-        session.onAgentSdkMessage?.(message);
 
         // Write to message log
         formatClaudeMessageForInk(message, messageBuffer);
