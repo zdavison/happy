@@ -198,6 +198,11 @@ export async function startEngine(opts: {
       abortHandle?.();
     },
     dispose: async () => {
+      // Abort any running turn FIRST so `claudeRemote` returns promptly, THEN
+      // close the queue so the launcher loop's `isClosed()` guard exits (rather
+      // than busy-spinning). `await launcherDone` then resolves and the rest of
+      // the cleanup runs; without this ordering dispose would deadlock.
+      abortHandle?.();
       messageQueue.close();
       await launcherDone;
       session.cleanup();
