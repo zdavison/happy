@@ -44,7 +44,13 @@ export interface Engine {
    * the phone uses, so first-answer-wins is enforced by the handler.
    */
   resolvePermission(id: string, approved: boolean): void;
-  /** Cancel any in-flight/queued work for the current turn. */
+  /**
+   * True when nothing is queued or running (message queue is empty). Used by the
+   * ACP agent to know a `result` has settled all activity before resolving the
+   * editor's pending prompt.
+   */
+  isIdle(): boolean;
+  /** Cancel the in-flight turn (real interrupt, does not drop queued prompts). */
   abort(): Promise<void>;
   /** Tear the engine down and release all resources. */
   dispose(): Promise<void>;
@@ -111,6 +117,21 @@ export async function startEngine(opts: {
   const messageQueue = new MessageQueue2<EnhancedMode>((mode) => hashObject(mode));
   const enhancedMode = (): EnhancedMode => ({ permissionMode: currentPermissionMode });
 
+  // Captured once the launcher registers its `abort` RPC; used by Engine.abort
+  // to trigger the real interrupt (abortController.abort()).
+  let abortHandle: (() => void) | null = null;
+
+  // Wire relayed phone prompts into the same queue the editor's prompts use so
+  // the phone can DRIVE (not just observe) the session. Mirrors runAcp.ts's
+  // simpler onUserMessage handler (no attachment draining here).
+  client.onUserMessage((message) => {
+    if (!message?.content?.text) return;
+    if (typeof message.meta?.permissionMode === 'string') {
+      currentPermissionMode = message.meta.permissionMode as PermissionMode;
+    }
+    messageQueue.push(message.content.text, enhancedMode(), undefined);
+  });
+
   const session = new Session({
     api,
     client,
@@ -137,6 +158,9 @@ export async function startEngine(opts: {
     onPermissionResolved: opts.onPermissionResolved,
     onPermissionHandlerReady: (h) => {
       permissionHandlerRef = h;
+    },
+    onAbortReady: (abort) => {
+      abortHandle = abort;
     },
   });
   sessionRef = session;
@@ -165,8 +189,13 @@ export async function startEngine(opts: {
     resolvePermission: (id, approved) => {
       permissionHandlerRef?.resolveExternally(id, { approved });
     },
+    isIdle: () => messageQueue.size() === 0,
     abort: async () => {
-      messageQueue.reset();
+      // Trigger the launcher's real interrupt (abortController.abort()). We do
+      // NOT reset the queue: queued phone prompts should survive a cancel of the
+      // current turn, and reset() would null the queue waiter without resolving
+      // it (a potential hang).
+      abortHandle?.();
     },
     dispose: async () => {
       messageQueue.close();

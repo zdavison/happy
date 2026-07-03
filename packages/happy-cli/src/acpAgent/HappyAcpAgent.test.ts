@@ -16,12 +16,17 @@ function makeAgent(connectionOverrides: Partial<AgentSideConnection> = {}) {
   return new HappyAcpAgent(connection, credentials);
 }
 
-function makeFakeEngine(push: Engine['push'], resolvePermission: Engine['resolvePermission'] = () => {}): Engine {
+function makeFakeEngine(
+  push: Engine['push'],
+  resolvePermission: Engine['resolvePermission'] = () => {},
+  isIdle: Engine['isIdle'] = () => true,
+): Engine {
   return {
     happySessionId: 'test-session',
     push,
     setPermissionMode: () => {},
     resolvePermission,
+    isIdle,
     abort: async () => {},
     dispose: async () => {},
   };
@@ -76,6 +81,42 @@ describe('HappyAcpAgent.prompt', () => {
       sessionId: 'sess-1',
       prompt: [{ type: 'text', text: 'again' }],
     } as any)).rejects.toThrow('no active session');
+  });
+});
+
+describe('HappyAcpAgent.onSdkMessage turn resolution', () => {
+  it('does NOT resolve a pending prompt on a result while the engine is not idle', async () => {
+    const agent = makeAgent();
+    // Engine reports work still queued/running (e.g. a phone turn interleaving).
+    (agent as any).engine = makeFakeEngine(() => {}, () => {}, () => false);
+    (agent as any).acpSessionId = 'sess-1';
+
+    const promptPromise = agent.prompt({
+      sessionId: 'sess-1',
+      prompt: [{ type: 'text', text: 'hi' }],
+    } as any);
+    let settled = false;
+    void promptPromise.then(() => { settled = true; });
+
+    // A result fires (for the phone turn), but the editor prompt must stay pending.
+    (agent as any).onSdkMessage({ type: 'result', subtype: 'success' });
+    await new Promise((r) => setImmediate(r));
+    expect(settled).toBe(false);
+  });
+
+  it('resolves the pending prompt on a result once the engine is idle', async () => {
+    const agent = makeAgent();
+    (agent as any).engine = makeFakeEngine(() => {}, () => {}, () => true);
+    (agent as any).acpSessionId = 'sess-1';
+
+    const promptPromise = agent.prompt({
+      sessionId: 'sess-1',
+      prompt: [{ type: 'text', text: 'hi' }],
+    } as any);
+
+    (agent as any).onSdkMessage({ type: 'result', subtype: 'success' });
+
+    await expect(promptPromise).resolves.toEqual({ stopReason: 'end_turn' });
   });
 });
 

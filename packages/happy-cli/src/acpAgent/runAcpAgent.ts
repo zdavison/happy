@@ -16,8 +16,19 @@ export async function runAcpAgent(opts: { credentials: Credentials }): Promise<v
   // stdout = JSON-RPC out (writable), stdin = JSON-RPC in (readable)
   const { writable, readable } = nodeToWebStreams(process.stdout, process.stdin);
   const stream = ndJsonStream(writable, readable);
-  const connection = new AgentSideConnection((conn) => new HappyAcpAgent(conn, opts.credentials), stream);
+  let agent: HappyAcpAgent | null = null;
+  const connection = new AgentSideConnection((conn) => {
+    agent = new HappyAcpAgent(conn, opts.credentials);
+    return agent;
+  }, stream);
   await new Promise<void>((resolve) => {
-    connection.signal.addEventListener('abort', () => resolve());
+    connection.signal.addEventListener('abort', () => {
+      // Dispose the engine (releases the Happy session and the temp
+      // hook-settings file) before resolving, keeping teardown await-safe.
+      void (async () => {
+        await agent?.dispose();
+        resolve();
+      })();
+    });
   });
 }

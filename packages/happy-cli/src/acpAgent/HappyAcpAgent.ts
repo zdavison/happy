@@ -91,10 +91,19 @@ export class HappyAcpAgent implements Agent {
     for (const update of sdkMessageToUpdates(m)) {
       void this.connection.sessionUpdate({ sessionId: this.acpSessionId, update });
     }
+    // ACP guarantees at most one editor `prompt` is in flight at a time (Zed
+    // awaits each prompt response before sending the next), so the head resolver
+    // always belongs to the editor's current turn. A `result` also fires for
+    // phone-driven turns, so we only resolve the editor's pending prompt once the
+    // engine is fully idle (nothing queued/running). This never resolves early:
+    // if a phone turn interleaves, the editor prompt resolves once all queued
+    // activity settles (a slight, acceptable over-wait; the editor still receives
+    // every streamed update meanwhile). A non-null `stop` while the engine is NOT
+    // idle is intentionally skipped (a phone turn finished but the editor's own
+    // turn is still queued/running).
     const stop = resultStopReason(m);
-    if (stop) {
-      const resolver = this.turnResolvers.shift();
-      resolver?.(stop);
+    if (stop && this.engine?.isIdle()) {
+      this.turnResolvers.shift()?.(stop);
     }
   }
 
@@ -151,5 +160,16 @@ export class HappyAcpAgent implements Agent {
 
   async cancel(_params: CancelNotification): Promise<void> {
     await this.engine?.abort();
+  }
+
+  /**
+   * Tear down the engine (stops the launcher, cleans up the temp hook-settings
+   * file, closes the Happy session). Called on connection teardown.
+   */
+  async dispose(): Promise<void> {
+    const engine = this.engine;
+    this.engine = null;
+    this.acpSessionId = null;
+    await engine?.dispose();
   }
 }

@@ -97,6 +97,9 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
     // When to abort
     session.client.rpcHandlerManager.registerHandler('abort', doAbort); // When abort clicked
     session.client.rpcHandlerManager.registerHandler('switch', doSwitch); // When switch clicked
+    // Expose the real interrupt to observers (e.g. the ACP agent) so an editor
+    // `cancel` triggers the same abort path the phone's abort button uses.
+    session.onAbortReady?.(doAbort);
     // Removed catch-all stdin handler - now handled by RemoteModeDisplay keyboard handlers
 
     // Create permission handler
