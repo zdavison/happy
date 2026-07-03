@@ -397,6 +397,17 @@ Conversation history is preserved on the server, but in-flight tool calls are in
       process.exit(1)
     }
     return;
+  } else if (subcommand === 'acp-agent') {
+    try {
+      const { runAcpAgent } = await import('@/acpAgent/runAcpAgent');
+      const { credentials } = await authAndSetupMachineIfNeeded();
+      await runAcpAgent({ credentials });
+    } catch (error) {
+      // NEVER write errors to stdout in this mode — stderr only.
+      process.stderr.write(`acp-agent error: ${error instanceof Error ? error.message : String(error)}\n`);
+      process.exit(1);
+    }
+    return;
   } else if (subcommand === 'openclaw') {
     try {
       const { runOpenClaw } = await import('@/openclaw/runOpenClaw');
