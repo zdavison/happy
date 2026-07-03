@@ -727,7 +727,7 @@ git commit -m "feat(cli): ACP prompt pushes to the Claude queue and awaits turn 
 import { AgentSideConnection, ndJsonStream } from '@agentclientprotocol/sdk';
 import type { Credentials } from '@/persistence';
 import { HappyAcpAgent } from './HappyAcpAgent';
-import { nodeToWebStreams } from './stdioStreams';
+import { nodeToWebStreams } from '@/utils/nodeToWebStreams';
 
 export async function runAcpAgent(opts: { credentials: Credentials }): Promise<void> {
   // stdout = JSON-RPC out (writable), stdin = JSON-RPC in (readable)
@@ -740,9 +740,13 @@ export async function runAcpAgent(opts: { credentials: Credentials }): Promise<v
 }
 ```
 
-- [ ] **Step 2: Extract `nodeToWebStreams` for reuse**
+- [ ] **Step 2: Extract `nodeToWebStreams` to a shared util (no duplication)**
 
-Create `packages/happy-cli/src/acpAgent/stdioStreams.ts` by copying the `nodeToWebStreams` helper from `packages/happy-cli/src/agent/acp/AcpBackend.ts:217-270` (it converts a Node `Writable`+`Readable` into `{ writable, readable }` web streams). Export it. (Do not re-import from AcpBackend — it is not exported there; copy the small helper and note the source in a comment. Both files MIT.)
+The `nodeToWebStreams` helper currently lives module-private in `packages/happy-cli/src/agent/acp/AcpBackend.ts:217-270` (converts a Node `Writable`+`Readable` into `{ writable, readable }` web streams). Do NOT copy it. Instead:
+  1. Create `packages/happy-cli/src/utils/nodeToWebStreams.ts` and MOVE the helper there verbatim (with its imports `Readable, Writable` from `node:stream`). Export it: `export function nodeToWebStreams(stdin: Writable, stdout: Readable): { writable: WritableStream<Uint8Array>; readable: ReadableStream<Uint8Array> }`.
+  2. In `AcpBackend.ts`, delete the local definition and add `import { nodeToWebStreams } from '@/utils/nodeToWebStreams';`.
+  3. In `runAcpAgent.ts`, import from the same shared util: `import { nodeToWebStreams } from '@/utils/nodeToWebStreams';` (remove the `./stdioStreams` import). Delete the `stdioStreams.ts` reference — it is not created.
+  4. Run the existing ACP-client tests to confirm the move is behavior-preserving: `cd packages/happy-cli && npx vitest run src/agent/acp` — expected PASS.
 
 - [ ] **Step 3: Add the subcommand branch to index.ts**
 
@@ -769,7 +773,7 @@ Expected: no errors.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/happy-cli/src/acpAgent/runAcpAgent.ts packages/happy-cli/src/acpAgent/stdioStreams.ts packages/happy-cli/src/index.ts
+git add packages/happy-cli/src/acpAgent/runAcpAgent.ts packages/happy-cli/src/utils/nodeToWebStreams.ts packages/happy-cli/src/agent/acp/AcpBackend.ts packages/happy-cli/src/index.ts
 git commit -m "feat(cli): happy acp-agent subcommand + stdio AgentSideConnection"
 ```
 
