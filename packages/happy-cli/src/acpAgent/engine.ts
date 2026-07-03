@@ -49,6 +49,13 @@ export async function startEngine(opts: {
   onAgentSdkMessage: (m: SDKMessage) => void;
   onPermissionRequest: (r: { id: string; toolName: string; input: unknown }) => void;
   onPermissionResolved: (id: string) => void;
+  /**
+   * Fires once the launcher promise settles (success or failure), i.e. the
+   * underlying Claude process is no longer driving this session. Lets callers
+   * (the ACP agent) unblock anything still waiting on turn completion instead
+   * of hanging forever if the launcher dies without emitting a `result`.
+   */
+  onEngineClosed?: () => void;
 }): Promise<Engine> {
   const api = await ApiClient.create(opts.credentials);
   const settings = await readSettings();
@@ -127,9 +134,13 @@ export async function startEngine(opts: {
   session.onModeChange('remote');
 
   // Run the launcher for the session lifetime; do NOT await it here.
-  const launcherDone = claudeRemoteLauncher(session).catch((e) => {
-    logger.debug('[acp-agent] launcher exited', e);
-  });
+  const launcherDone = claudeRemoteLauncher(session)
+    .catch((e) => {
+      logger.debug('[acp-agent] launcher exited', e);
+    })
+    .finally(() => {
+      opts.onEngineClosed?.();
+    });
 
   return {
     happySessionId: response.id,

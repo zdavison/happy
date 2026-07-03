@@ -13,6 +13,7 @@ import { logger } from '@/ui/logger';
 import type { SDKMessage } from '@/claude/sdk';
 import { startEngine, type Engine } from './engine';
 import { sdkMessageToUpdates, resultStopReason } from './sdkMessageToAcp';
+import { parsePromptBlocks } from './contentBlocks';
 
 const PROTOCOL_VERSION = 1;
 
@@ -59,8 +60,22 @@ export class HappyAcpAgent implements Agent {
       onPermissionResolved: (_id) => {
         // Task 9: notify the ACP client a permission was resolved.
       },
+      onEngineClosed: () => this.onEngineClosed(),
     });
     return { sessionId };
+  }
+
+  /**
+   * The Claude launcher died (or exited) without producing a `result` SDK
+   * message. Without this, an in-flight `prompt` would await its resolver
+   * forever. Unblock any outstanding turn(s) so the ACP client gets a
+   * response instead of a hang.
+   */
+  private onEngineClosed(): void {
+    const resolvers = this.turnResolvers.splice(0, this.turnResolvers.length);
+    for (const resolve of resolvers) {
+      resolve('cancelled');
+    }
   }
 
   private onSdkMessage(m: SDKMessage): void {
@@ -77,8 +92,14 @@ export class HappyAcpAgent implements Agent {
     }
   }
 
-  async prompt(_params: PromptRequest): Promise<PromptResponse> {
-    throw new Error('not implemented'); // Task 8
+  async prompt(params: PromptRequest): Promise<PromptResponse> {
+    if (!this.engine) throw new Error('no active session');
+    const { text, attachments } = parsePromptBlocks(params.prompt);
+    const stopReason = await new Promise<StopReason>((resolve) => {
+      this.turnResolvers.push(resolve);
+      this.engine!.push(text, attachments);
+    });
+    return { stopReason };
   }
 
   async setSessionMode(_params: SetSessionModeRequest): Promise<SetSessionModeResponse | void> {
