@@ -120,14 +120,16 @@ export async function startEngine(opts: {
   });
   sessionRef = session;
 
+  // Drive the session into remote mode once. The Session's own 2s keepAlive
+  // (session.ts:85-88) sends `client.keepAlive(this.thinking, this.mode)`;
+  // without this the mode stays 'local' and the reported control mode flaps
+  // between local/remote. The `onModeChange` option we passed is a no-op here.
+  session.onModeChange('remote');
+
   // Run the launcher for the session lifetime; do NOT await it here.
   const launcherDone = claudeRemoteLauncher(session).catch((e) => {
     logger.debug('[acp-agent] launcher exited', e);
   });
-
-  const keepAlive = setInterval(() => {
-    client.keepAlive(session.thinking, 'remote');
-  }, 2000);
 
   return {
     happySessionId: response.id,
@@ -139,7 +141,6 @@ export async function startEngine(opts: {
       messageQueue.reset();
     },
     dispose: async () => {
-      clearInterval(keepAlive);
       messageQueue.close();
       await launcherDone;
       session.cleanup();
