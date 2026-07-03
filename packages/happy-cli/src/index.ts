@@ -400,12 +400,23 @@ Conversation history is preserved on the server, but in-flight tool calls are in
   } else if (subcommand === 'acp-agent') {
     try {
       const { runAcpAgent } = await import('@/acpAgent/runAcpAgent');
+      const { resolveAcpAgentConfig } = await import('@/agent/acp');
       const credentials = await readCredentials();
       if (!credentials) {
         process.stderr.write('happy acp-agent: not authenticated. Run `happy` once to log in, then restart your editor.\n');
         process.exit(1);
       }
-      await runAcpAgent({ credentials });
+
+      // Parse `happy acp-agent <agent-name>` or `happy acp-agent -- <command> [args]`.
+      // `resolveAcpAgentConfig` handles the `--`/known-agent split itself.
+      const resolvedAcpAgent = resolveAcpAgentConfig(args.slice(1));
+
+      await runAcpAgent({
+        credentials,
+        agentName: resolvedAcpAgent.agentName,
+        command: resolvedAcpAgent.command,
+        args: resolvedAcpAgent.args,
+      });
     } catch (error) {
       // NEVER write errors to stdout in this mode — stderr only.
       process.stderr.write(`acp-agent error: ${error instanceof Error ? error.message : String(error)}\n`);
