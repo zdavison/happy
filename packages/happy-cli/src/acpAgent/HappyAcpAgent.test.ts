@@ -68,5 +68,12 @@ describe('HappyAcpAgent.prompt', () => {
     (agent as any).onEngineClosed();
 
     await expect(promptPromise).resolves.toEqual({ stopReason: 'cancelled' });
+
+    // The engine is now marked dead: a subsequent prompt must reject rather
+    // than push into the defunct queue and hang forever.
+    await expect(agent.prompt({
+      sessionId: 'sess-1',
+      prompt: [{ type: 'text', text: 'again' }],
+    } as any)).rejects.toThrow('no active session');
   });
 });

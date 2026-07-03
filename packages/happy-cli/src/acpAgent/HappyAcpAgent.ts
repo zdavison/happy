@@ -76,6 +76,11 @@ export class HappyAcpAgent implements Agent {
     for (const resolve of resolvers) {
       resolve('cancelled');
     }
+    // Mark the engine dead so a NEW prompt issued after the launcher died hits
+    // the `if (!this.engine) throw` guard instead of pushing into a defunct
+    // queue and hanging forever with nothing left to rescue it.
+    this.engine = null;
+    this.acpSessionId = null;
   }
 
   private onSdkMessage(m: SDKMessage): void {
