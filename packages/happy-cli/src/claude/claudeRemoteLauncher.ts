@@ -136,6 +136,9 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
 
     function onMessage(message: SDKMessage) {
 
+        // Tap for ACP/headless consumers listening for raw SDK messages
+        session.onAgentSdkMessage?.(message);
+
         // Write to message log
         formatClaudeMessageForInk(message, messageBuffer);
 
