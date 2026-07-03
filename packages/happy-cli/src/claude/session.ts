@@ -5,6 +5,7 @@ import { logger } from "@/ui/logger";
 import type { JsRuntime } from "./runClaude";
 import type { SandboxConfig } from "@/persistence";
 import type { SDKMessage } from "@/claude/sdk";
+import type { PermissionHandler } from "@/claude/utils/permissionHandler";
 
 export class Session {
     readonly path: string;
@@ -29,6 +30,8 @@ export class Session {
     readonly onPermissionRequest?: (req: { id: string; toolName: string; input: unknown }) => void;
     /** Optional tap for observing permission resolutions (used by the ACP agent) */
     readonly onPermissionResolved?: (id: string) => void;
+    /** Optional tap exposing the PermissionHandler once the launcher creates it (used by the ACP agent to resolve requests externally) */
+    readonly onPermissionHandlerReady?: (handler: PermissionHandler) => void;
 
     sessionId: string | null;
     mode: 'local' | 'remote' = 'local';
@@ -61,6 +64,7 @@ export class Session {
         onAgentSdkMessage?: (message: SDKMessage) => void,
         onPermissionRequest?: (req: { id: string; toolName: string; input: unknown }) => void,
         onPermissionResolved?: (id: string) => void,
+        onPermissionHandlerReady?: (handler: PermissionHandler) => void,
     }) {
         this.path = opts.path;
         this.api = opts.api;
@@ -80,6 +84,7 @@ export class Session {
         this.onAgentSdkMessage = opts.onAgentSdkMessage;
         this.onPermissionRequest = opts.onPermissionRequest;
         this.onPermissionResolved = opts.onPermissionResolved;
+        this.onPermissionHandlerReady = opts.onPermissionHandlerReady;
 
         // Start keep alive
         this.client.keepAlive(this.thinking, this.mode);

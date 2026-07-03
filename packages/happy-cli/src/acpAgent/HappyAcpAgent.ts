@@ -7,6 +7,7 @@ import type {
   SetSessionModeRequest, SetSessionModeResponse,
   AuthenticateRequest, AuthenticateResponse,
   StopReason,
+  PermissionOption,
 } from '@agentclientprotocol/sdk';
 import type { Credentials } from '@/persistence';
 import { logger } from '@/ui/logger';
@@ -54,11 +55,10 @@ export class HappyAcpAgent implements Agent {
       credentials: this.credentials,
       cwd: params.cwd,
       onAgentSdkMessage: (m) => this.onSdkMessage(m),
-      onPermissionRequest: (_r) => {
-        // Task 9: forward permission requests to the ACP client.
-      },
+      onPermissionRequest: (r) => this.onPermissionRequest(r),
       onPermissionResolved: (_id) => {
-        // Task 9: notify the ACP client a permission was resolved.
+        // First-answer-wins is enforced by resolveExternally returning false
+        // once a request is resolved; no per-request bookkeeping needed here.
       },
       onEngineClosed: () => this.onEngineClosed(),
     });
@@ -95,6 +95,35 @@ export class HappyAcpAgent implements Agent {
       const resolver = this.turnResolvers.shift();
       resolver?.(stop);
     }
+  }
+
+  /**
+   * Claude gated a tool. Forward the request to the ACP editor via
+   * `requestPermission` and, when it answers with a selected option, route the
+   * decision back through the engine's `resolvePermission` (which uses the
+   * shared `resolveExternally` path). If the phone answered first,
+   * `resolveExternally` returns false and the editor's late answer is a
+   * harmless no-op.
+   */
+  private onPermissionRequest(r: { id: string; toolName: string; input: unknown }): void {
+    if (!this.acpSessionId) {
+      return;
+    }
+    const options: PermissionOption[] = [
+      { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
+      { optionId: 'deny', name: 'Deny', kind: 'reject_once' },
+    ];
+    void this.connection.requestPermission({
+      sessionId: this.acpSessionId,
+      toolCall: { toolCallId: r.id, title: r.toolName, rawInput: r.input, status: 'pending' },
+      options,
+    }).then((resp) => {
+      if (resp.outcome.outcome === 'selected') {
+        this.engine?.resolvePermission(r.id, resp.outcome.optionId === 'allow');
+      }
+    }).catch(() => {
+      // Editor cancelled the request or the connection closed; nothing to do.
+    });
   }
 
   async prompt(params: PromptRequest): Promise<PromptResponse> {

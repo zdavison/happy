@@ -10,17 +10,18 @@ import type { Engine } from './engine';
 // directly via `as any` (mirroring the `as any` SDK-message casts already
 // used in sdkMessageToAcp.test.ts) so `prompt`'s queueing/resolution logic
 // and the launcher-death safety net can be exercised without a live server.
-function makeAgent() {
-  const connection = { sessionUpdate: vi.fn() } as unknown as AgentSideConnection;
+function makeAgent(connectionOverrides: Partial<AgentSideConnection> = {}) {
+  const connection = { sessionUpdate: vi.fn(), ...connectionOverrides } as unknown as AgentSideConnection;
   const credentials = {} as Credentials;
   return new HappyAcpAgent(connection, credentials);
 }
 
-function makeFakeEngine(push: Engine['push']): Engine {
+function makeFakeEngine(push: Engine['push'], resolvePermission: Engine['resolvePermission'] = () => {}): Engine {
   return {
     happySessionId: 'test-session',
     push,
     setPermissionMode: () => {},
+    resolvePermission,
     abort: async () => {},
     dispose: async () => {},
   };
@@ -75,5 +76,61 @@ describe('HappyAcpAgent.prompt', () => {
       sessionId: 'sess-1',
       prompt: [{ type: 'text', text: 'again' }],
     } as any)).rejects.toThrow('no active session');
+  });
+});
+
+describe('HappyAcpAgent.onPermissionRequest', () => {
+  it('forwards the request to the editor and resolves via the engine on an "allow" selection', async () => {
+    const requestPermission = vi.fn().mockResolvedValue({
+      outcome: { outcome: 'selected', optionId: 'allow' },
+    });
+    const agent = makeAgent({ requestPermission } as Partial<AgentSideConnection>);
+    const resolved: Array<{ id: string; approved: boolean }> = [];
+    (agent as any).engine = makeFakeEngine(() => {}, (id: string, approved: boolean) => {
+      resolved.push({ id, approved });
+    });
+    (agent as any).acpSessionId = 'sess-1';
+
+    (agent as any).onPermissionRequest({ id: 'req-1', toolName: 'Bash', input: { command: 'ls' } });
+
+    // Let the requestPermission promise settle.
+    await new Promise((r) => setImmediate(r));
+
+    expect(requestPermission).toHaveBeenCalledTimes(1);
+    const arg = requestPermission.mock.calls[0][0];
+    expect(arg.sessionId).toBe('sess-1');
+    expect(arg.toolCall).toMatchObject({ toolCallId: 'req-1', title: 'Bash', status: 'pending' });
+    expect(arg.options.map((o: any) => o.optionId)).toEqual(['allow', 'deny']);
+    expect(resolved).toEqual([{ id: 'req-1', approved: true }]);
+  });
+
+  it('resolves with approved=false on a "deny" selection', async () => {
+    const requestPermission = vi.fn().mockResolvedValue({
+      outcome: { outcome: 'selected', optionId: 'deny' },
+    });
+    const agent = makeAgent({ requestPermission } as Partial<AgentSideConnection>);
+    const resolved: Array<{ id: string; approved: boolean }> = [];
+    (agent as any).engine = makeFakeEngine(() => {}, (id: string, approved: boolean) => {
+      resolved.push({ id, approved });
+    });
+    (agent as any).acpSessionId = 'sess-1';
+
+    (agent as any).onPermissionRequest({ id: 'req-2', toolName: 'Write', input: {} });
+    await new Promise((r) => setImmediate(r));
+
+    expect(resolved).toEqual([{ id: 'req-2', approved: false }]);
+  });
+
+  it('does not resolve when the editor cancels the request', async () => {
+    const requestPermission = vi.fn().mockResolvedValue({ outcome: { outcome: 'cancelled' } });
+    const agent = makeAgent({ requestPermission } as Partial<AgentSideConnection>);
+    const resolved: string[] = [];
+    (agent as any).engine = makeFakeEngine(() => {}, (id: string) => resolved.push(id));
+    (agent as any).acpSessionId = 'sess-1';
+
+    (agent as any).onPermissionRequest({ id: 'req-3', toolName: 'Bash', input: {} });
+    await new Promise((r) => setImmediate(r));
+
+    expect(resolved).toEqual([]);
   });
 });

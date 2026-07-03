@@ -22,6 +22,7 @@ import { createSessionMetadata } from '@/utils/createSessionMetadata';
 import { MessageQueue2, type PendingAttachment } from '@/utils/MessageQueue2';
 import { Session } from '@/claude/session';
 import { claudeRemoteLauncher } from '@/claude/claudeRemoteLauncher';
+import type { PermissionHandler } from '@/claude/utils/permissionHandler';
 import { startHappyServer } from '@/claude/utils/startHappyServer';
 import { startHookServer } from '@/claude/utils/startHookServer';
 import { generateHookSettingsFile, cleanupHookSettingsFile } from '@/claude/utils/generateHookSettings';
@@ -37,6 +38,12 @@ export interface Engine {
   push(text: string, attachments?: PendingAttachment[]): void;
   /** Update the permission mode applied to subsequently pushed prompts. */
   setPermissionMode(mode: PermissionMode): void;
+  /**
+   * Resolve a pending tool-permission request from outside the phone RPC flow
+   * (used by the ACP editor). Routes through the same `resolveExternally` path
+   * the phone uses, so first-answer-wins is enforced by the handler.
+   */
+  resolvePermission(id: string, approved: boolean): void;
   /** Cancel any in-flight/queued work for the current turn. */
   abort(): Promise<void>;
   /** Tear the engine down and release all resources. */
@@ -96,6 +103,10 @@ export async function startEngine(opts: {
   });
   const hookSettingsPath = generateHookSettingsFile(hookServer.port);
 
+  // Captured once the launcher constructs its PermissionHandler; used by
+  // resolvePermission to route the editor's answer through resolveExternally.
+  let permissionHandlerRef: PermissionHandler | null = null;
+
   let currentPermissionMode: PermissionMode = 'default';
   const messageQueue = new MessageQueue2<EnhancedMode>((mode) => hashObject(mode));
   const enhancedMode = (): EnhancedMode => ({ permissionMode: currentPermissionMode });
@@ -124,6 +135,9 @@ export async function startEngine(opts: {
     onAgentSdkMessage: opts.onAgentSdkMessage,
     onPermissionRequest: opts.onPermissionRequest,
     onPermissionResolved: opts.onPermissionResolved,
+    onPermissionHandlerReady: (h) => {
+      permissionHandlerRef = h;
+    },
   });
   sessionRef = session;
 
@@ -147,6 +161,9 @@ export async function startEngine(opts: {
     push: (text, attachments) => messageQueue.push(text, enhancedMode(), attachments),
     setPermissionMode: (mode) => {
       currentPermissionMode = mode;
+    },
+    resolvePermission: (id, approved) => {
+      permissionHandlerRef?.resolveExternally(id, { approved });
     },
     abort: async () => {
       messageQueue.reset();

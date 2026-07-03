@@ -101,6 +101,9 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
 
     // Create permission handler
     const permissionHandler = new PermissionHandler(session);
+    // Expose the handler to observers (e.g. the ACP agent) so they can resolve
+    // requests externally through the same resolveExternally path the phone uses.
+    session.onPermissionHandlerReady?.(permissionHandler);
 
     // Drop any permission requests left over in agent state from a
     // previous CLI process that died while a tool prompt was open. The
