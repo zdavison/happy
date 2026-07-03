@@ -11,6 +11,7 @@ import type {
 } from '@agentclientprotocol/sdk';
 import type { Credentials } from '@/persistence';
 import { logger } from '@/ui/logger';
+import type { PermissionMode } from '@/claude/loop';
 import type { SDKMessage } from '@/claude/sdk';
 import { startEngine, type Engine } from './engine';
 import { sdkMessageToUpdates, resultStopReason } from './sdkMessageToAcp';
@@ -121,8 +122,8 @@ export class HappyAcpAgent implements Agent {
       if (resp.outcome.outcome === 'selected') {
         this.engine?.resolvePermission(r.id, resp.outcome.optionId === 'allow');
       }
-    }).catch(() => {
-      // Editor cancelled the request or the connection closed; nothing to do.
+    }).catch((err) => {
+      logger.debug('[acp-agent] requestPermission failed', err);
     });
   }
 
@@ -136,11 +137,19 @@ export class HappyAcpAgent implements Agent {
     return { stopReason };
   }
 
-  async setSessionMode(_params: SetSessionModeRequest): Promise<SetSessionModeResponse | void> {
-    return; // Task 10
+  async setSessionMode(params: SetSessionModeRequest): Promise<SetSessionModeResponse | void> {
+    const map: Record<string, PermissionMode> = {
+      default: 'default',
+      acceptEdits: 'acceptEdits',
+      bypassPermissions: 'bypassPermissions',
+      plan: 'plan',
+    };
+    const mode = map[params.modeId] ?? 'default';
+    this.engine?.setPermissionMode(mode);
+    return;
   }
 
-  async cancel(params: CancelNotification): Promise<void> {
-    logger.debug(`[acp-agent] cancel ${params.sessionId}`); // Task 10 wires the abort
+  async cancel(_params: CancelNotification): Promise<void> {
+    await this.engine?.abort();
   }
 }

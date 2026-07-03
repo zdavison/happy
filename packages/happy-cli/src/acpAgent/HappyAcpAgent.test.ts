@@ -79,6 +79,48 @@ describe('HappyAcpAgent.prompt', () => {
   });
 });
 
+describe('HappyAcpAgent.setSessionMode', () => {
+  it('maps a known modeId to the matching PermissionMode', async () => {
+    const agent = makeAgent();
+    const modes: string[] = [];
+    (agent as any).engine = makeFakeEngine(() => {}, () => {});
+    (agent as any).engine.setPermissionMode = (mode: string) => modes.push(mode);
+
+    await agent.setSessionMode({ sessionId: 'sess-1', modeId: 'plan' } as any);
+
+    expect(modes).toEqual(['plan']);
+  });
+
+  it('falls back to "default" for an unknown modeId', async () => {
+    const agent = makeAgent();
+    const modes: string[] = [];
+    (agent as any).engine = makeFakeEngine(() => {}, () => {});
+    (agent as any).engine.setPermissionMode = (mode: string) => modes.push(mode);
+
+    await agent.setSessionMode({ sessionId: 'sess-1', modeId: 'nonsense' } as any);
+
+    expect(modes).toEqual(['default']);
+  });
+});
+
+describe('HappyAcpAgent.cancel', () => {
+  it('awaits the engine abort', async () => {
+    const agent = makeAgent();
+    let aborted = false;
+    (agent as any).engine = makeFakeEngine(() => {});
+    (agent as any).engine.abort = async () => { aborted = true; };
+
+    await agent.cancel({ sessionId: 'sess-1' } as any);
+
+    expect(aborted).toBe(true);
+  });
+
+  it('is a no-op without an active engine', async () => {
+    const agent = makeAgent();
+    await expect(agent.cancel({ sessionId: 'sess-1' } as any)).resolves.toBeUndefined();
+  });
+});
+
 describe('HappyAcpAgent.onPermissionRequest', () => {
   it('forwards the request to the editor and resolves via the engine on an "allow" selection', async () => {
     const requestPermission = vi.fn().mockResolvedValue({
