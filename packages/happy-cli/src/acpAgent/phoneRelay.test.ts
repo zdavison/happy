@@ -8,8 +8,8 @@
  * only the access path is corrected to `out[0].ev` here.
  */
 import { describe, it, expect } from 'vitest';
-import type { SessionUpdate } from '@agentclientprotocol/sdk';
-import { sessionUpdateToEnvelopes } from './phoneRelay';
+import type { SessionUpdate, RequestPermissionRequest, PermissionOption } from '@agentclientprotocol/sdk';
+import { sessionUpdateToEnvelopes, extractPermissionRequestInput, permissionResultToOutcome } from './phoneRelay';
 
 describe('sessionUpdateToEnvelopes', () => {
   it('maps agent_message_chunk text to a text envelope', () => {
@@ -35,5 +35,64 @@ describe('sessionUpdateToEnvelopes', () => {
 
   it('returns [] for unhandled variants', () => {
     expect(sessionUpdateToEnvelopes({ sessionUpdate: 'plan' } as unknown as SessionUpdate, 't1')).toEqual([]);
+  });
+});
+
+describe('extractPermissionRequestInput', () => {
+  it('pulls toolCallId/toolName/input from the ACP request', () => {
+    const request = {
+      options: [],
+      sessionId: 's1',
+      toolCall: { toolCallId: 'c1', kind: 'execute', rawInput: { command: 'ls' } },
+    } as unknown as RequestPermissionRequest;
+    expect(extractPermissionRequestInput(request)).toEqual({
+      toolCallId: 'c1',
+      toolName: 'execute',
+      input: { command: 'ls' },
+    });
+  });
+
+  it('falls back through title and the extended input fields', () => {
+    const request = {
+      options: [],
+      sessionId: 's1',
+      toolCall: { toolCallId: 'c2', title: 'Read file', arguments: { path: '/tmp/x' } },
+    } as unknown as RequestPermissionRequest;
+    const out = extractPermissionRequestInput(request);
+    expect(out.toolName).toBe('Read file');
+    expect(out.input).toEqual({ path: '/tmp/x' });
+  });
+});
+
+describe('permissionResultToOutcome', () => {
+  const options: PermissionOption[] = [
+    { optionId: 'yes', name: 'Allow once', kind: 'allow_once' },
+    { optionId: 'yes-always', name: 'Always allow', kind: 'allow_always' },
+    { optionId: 'no', name: 'Reject', kind: 'reject_once' },
+  ];
+
+  it('maps approved to the allow_once option id', () => {
+    expect(permissionResultToOutcome({ decision: 'approved' }, options)).toEqual({
+      outcome: { outcome: 'selected', optionId: 'yes' },
+    });
+  });
+
+  it('maps approved_for_session to the allow_always option id', () => {
+    expect(permissionResultToOutcome({ decision: 'approved_for_session' }, options)).toEqual({
+      outcome: { outcome: 'selected', optionId: 'yes-always' },
+    });
+  });
+
+  it('maps denied to the reject option id', () => {
+    expect(permissionResultToOutcome({ decision: 'denied' }, options)).toEqual({
+      outcome: { outcome: 'selected', optionId: 'no' },
+    });
+  });
+
+  it('maps abort with no reject option to a cancelled outcome', () => {
+    const allowOnly: PermissionOption[] = [{ optionId: 'yes', name: 'Allow', kind: 'allow_once' }];
+    expect(permissionResultToOutcome({ decision: 'abort' }, allowOnly)).toEqual({
+      outcome: { outcome: 'cancelled' },
+    });
   });
 });
