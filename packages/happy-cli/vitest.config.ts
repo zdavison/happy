@@ -19,24 +19,6 @@ export default defineConfig({
                 },
             },
             {
-                // Fully mocked, hermetic "integration" tests (e.g. ACP handshake over an
-                // in-memory stream). These are named `*.integration.test.ts` to signal what
-                // they exercise (protocol/wire-level integration), but — unlike the other
-                // integration-* projects below — they never touch a live server, network, or
-                // Claude process, so they need none of the heavyweight env provisioning /
-                // extended timeouts those projects use.
-                extends: true,
-                test: {
-                    name: 'integration-mocked',
-                    include: [
-                        'src/acpAgent/**/*.integration.test.ts',
-                    ],
-                    sequence: {
-                        groupOrder: 0,
-                    },
-                },
-            },
-            {
                 extends: true,
                 test: {
                     name: 'integration-empty',
