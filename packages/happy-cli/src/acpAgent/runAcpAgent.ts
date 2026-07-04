@@ -27,14 +27,23 @@
  *     `undefined` rather than erroring. So when forwarding Zed's `initialize`
  *     down we must NOT advertise terminal support to the downstream. `fs`
  *     capabilities are kept (readTextFile/writeTextFile ARE forwarded).
+ *
+ *  3. **One turn in flight** (`serializedPrompt`, wrapping `spawned.connection.prompt`):
+ *     Zed and the phone can each independently send a prompt to the downstream
+ *     with no coordination between them. Both `proxyAgent.prompt` (Zed) and
+ *     `relay.onUserMessage` (phone) are routed through a single
+ *     `createPromptSerializer` instance so the downstream never receives two
+ *     concurrent `prompt` calls -- the next one starts only once the previous
+ *     has settled.
  */
 import { AgentSideConnection, ndJsonStream } from '@agentclientprotocol/sdk';
-import type { InitializeRequest, RequestPermissionResponse } from '@agentclientprotocol/sdk';
+import type { InitializeRequest, PromptRequest, RequestPermissionResponse } from '@agentclientprotocol/sdk';
 import type { Credentials } from '@/persistence';
 import { nodeToWebStreams } from '@/utils/nodeToWebStreams';
 import { HappyProxyAgent, HappyProxyClient, type ProxyTaps } from './proxy';
 import { spawnDownstream } from './downstream';
 import { PhoneRelay } from './phoneRelay';
+import { createPromptSerializer } from './promptSerializer';
 import { logger } from '@/ui/logger';
 
 /**
@@ -119,6 +128,26 @@ export async function runAcpAgent(opts: {
   // stripTerminal / the file header). Everything else forwards verbatim.
   proxyAgent.initialize = (params) => spawned.connection.initialize(stripTerminal(params));
 
+  // One turn in flight, regardless of source: Zed and the phone can each
+  // independently decide to send a prompt to the downstream (see the file
+  // header), and downstream agents may reject or misbehave on a second
+  // concurrent `prompt` call. Route every downstream prompt -- from either
+  // side -- through a single serializer so the next prompt never starts
+  // until the previous one has settled.
+  const serializedPrompt = createPromptSerializer((p: PromptRequest) => spawned.connection.prompt(p));
+
+  // Route Zed's prompts through the serializer too, preserving the exact tap
+  // behaviour `HappyProxyAgent.prompt` normally provides (see proxy.ts):
+  // `onPrompt` before forwarding, `onPromptDone` after the downstream call
+  // resolves -- the latter is what drives `relay.endTurn('completed')` for
+  // Zed-initiated turns, so it must not be dropped here.
+  proxyAgent.prompt = async (p) => {
+    taps.onPrompt?.(p);
+    const res = await serializedPrompt(p);
+    taps.onPromptDone?.(p.sessionId);
+    return res;
+  };
+
   const { writable, readable } = nodeToWebStreams(process.stdout, process.stdin);
   zed = new AgentSideConnection(() => proxyAgent, ndJsonStream(writable, readable));
 
@@ -128,8 +157,7 @@ export async function runAcpAgent(opts: {
     if (!currentDownstreamSessionId) {
       return;
     }
-    void spawned.connection
-      .prompt({ sessionId: currentDownstreamSessionId, prompt: [{ type: 'text', text }] })
+    void serializedPrompt({ sessionId: currentDownstreamSessionId, prompt: [{ type: 'text', text }] })
       .then(() => relay.endTurn('completed'))
       .catch((e) => logger.debug('[acp-agent] phone prompt failed', e));
   });
