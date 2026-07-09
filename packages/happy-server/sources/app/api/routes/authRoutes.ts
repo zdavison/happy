@@ -4,6 +4,7 @@ import * as privacyKit from "privacy-kit";
 import { db } from "@/storage/db";
 import { auth } from "@/app/auth/auth";
 import { log } from "@/utils/log";
+import { isRegistrationAllowed } from "@/utils/isRegistrationAllowed";
 
 export function authRoutes(app: Fastify) {
     app.post('/v1/auth', {
@@ -26,6 +27,9 @@ export function authRoutes(app: Fastify) {
 
         // Create or update user in database
         const publicKeyHex = privacyKit.encodeHex(publicKey);
+        if (!isRegistrationAllowed(publicKeyHex, process.env.HAPPY_ALLOWED_PUBLIC_KEYS)) {
+            return reply.code(403).send({ error: 'Registration not allowed' });
+        }
         const user = await db.account.upsert({
             where: { publicKey: publicKeyHex },
             update: { updatedAt: new Date() },
