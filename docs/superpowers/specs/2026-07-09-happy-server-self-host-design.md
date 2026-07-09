@@ -50,9 +50,9 @@ HTTP + Socket.IO share port **3005**; Socket.IO path is `/v1/updates`; health en
   `cli-smoke-test.yml`, `typecheck.yml`) builds the root `Dockerfile` from the monorepo
   root and pushes `ghcr.io/zdavison/happy-server:<tag>`.
 - The GHCR package is marked **Public**, so k3s pulls it with **no imagePullSecret**.
-- Tag strategy: pin to an immutable tag (git SHA or version), not `:latest`, so redeploys
-  are explicit. Redeploy = build new tag → bump the tag in the Deployment → `kubectl -n
-  happy rollout restart deploy/happy-server` (or `set image`).
+- Tag strategy: **`:latest`** (preferred for convenience). The Deployment sets
+  `imagePullPolicy: Always` so a redeploy actually re-pulls the newest image. Redeploy =
+  push a new `:latest` from CI → `kubectl -n happy rollout restart deploy/happy-server`.
 
 ### Security: public-key registration allowlist
 
@@ -103,8 +103,8 @@ namespace-first (the `monitoring/` pattern):
 infra/k8s/happy/
   namespace.yaml     # namespace: happy
   pvc.yaml           # local-path, ~20Gi, RWO, for /data (PGlite + files)
-  deployment.yaml    # ghcr.io/zdavison/happy-server:<tag>, port 3005,
-                     #   /health probes, /data mount, envFrom secret happy-secrets
+  deployment.yaml    # ghcr.io/zdavison/happy-server:latest, imagePullPolicy: Always,
+                     #   port 3005, /health probes, /data mount, envFrom secret happy-secrets
   service.yaml       # ClusterIP :3005
   ingress.yaml       # host happy.digger.ooo, traefik, cert-manager cluster-issuer
                      #   letsencrypt, tls secretName happy-digger-ooo-tls, backend :3005
@@ -156,7 +156,7 @@ Ingress. No new firewall rules.
 
 1. Add DNS A record `happy.digger.ooo → 91.98.45.208`.
 2. Land the allowlist patch + GH Actions workflow in the `zdavison/happy` fork; Actions
-   builds and pushes the public GHCR image.
+   builds and pushes `ghcr.io/zdavison/happy-server:latest` (public package).
 3. Write `infra/k8s/happy/` manifests in the `digger.ooo` repo; `git pull` on the box.
 4. Create `/mnt/HC_Volume_106223433/secrets/happy.env` (allowlist empty for now) and the
    `happy-secrets` Secret.
