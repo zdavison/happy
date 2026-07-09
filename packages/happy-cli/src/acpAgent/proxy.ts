@@ -1,9 +1,8 @@
 /**
  * Bidirectional ACP proxy forwarders.
  *
- * The upstream side is any ACP-speaking client — a code editor or UI such as
- * Zed, Neovim, or a custom app. Nothing here is specific to Zed; "upstream"
- * always means whatever ACP client spawned us.
+ * "Upstream" is the ACP-speaking client that spawned this proxy — any
+ * conforming code editor or UI (e.g. Zed, Neovim, a custom app).
  *
  * `HappyProxyAgent` implements the ACP `Agent` interface that the upstream
  * client talks to. Every call is forwarded verbatim down to the downstream

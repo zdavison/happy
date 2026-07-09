@@ -1,9 +1,9 @@
 /**
  * runAcpAgent - assemble the Happy ACP proxy.
  *
- * Wires three parties together. "Upstream" is any ACP-speaking client — a code
- * editor or UI such as Zed, Neovim, or a custom app. Nothing below is
- * Zed-specific; "upstream" always means whatever ACP client spawned us.
+ * Wires three parties together. "Upstream" is the ACP-speaking client that
+ * spawned this proxy — any conforming code editor or UI (e.g. Zed, Neovim, a
+ * custom app).
  *
  *   upstream client  <--stdio-->  Happy proxy  <--stdio-->  downstream ACP agent
  *                                     |
@@ -98,10 +98,9 @@ export async function runAcpAgent(opts: {
   // 3-party permission race, first-successful-answer wins: the downstream's
   // permission request is fanned out to BOTH the upstream client and the phone.
   // If the upstream answers first, the still-pending phone prompt is cancelled
-  // via `onLose`. (The reverse — cancelling the upstream client's native prompt
-  // when the phone wins — isn't exposed by the ACP SDK, so that leg simply
-  // settles when the user dismisses it; it no longer leaks a promise as the old
-  // `Promise.race` version did.)
+  // via `onLose`. Cancelling the upstream client's native prompt when the phone
+  // wins isn't exposed by the ACP SDK, so that leg simply settles when the user
+  // dismisses it.
   proxyClient.requestPermission = (params) =>
     raceFirstSuccessful<RequestPermissionResponse>([
       { run: upstream.requestPermission(params) },

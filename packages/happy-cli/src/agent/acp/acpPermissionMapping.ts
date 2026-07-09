@@ -4,10 +4,9 @@
  * own `options` by `kind` rather than hardcoded, so they work across ACP
  * agents that name their options differently.
  *
- * (Note: `AcpBackend` still has its own, name-based permission mapping inline.
- * These two implementations are intentionally left separate for now — unifying
- * them is a follow-up, since the name-based path has different fallback
- * behaviour and its own regression coverage.)
+ * `AcpBackend` has a separate, name-based permission mapping inline; the two are
+ * kept distinct because the name-based path has different fallback behaviour and
+ * its own regression coverage.
  */
 import { randomUUID } from 'node:crypto';
 import type {

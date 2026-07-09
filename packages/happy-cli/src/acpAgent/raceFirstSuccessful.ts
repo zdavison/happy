@@ -4,9 +4,6 @@
  * rejects, in which case the last error is surfaced. When a winner is found,
  * each losing leg's optional `onLose` cleanup runs so nothing is left dangling
  * (e.g. cancelling a pending phone-permission request the loser owns).
- *
- * This replaces the older `Promise.race([leg.catch(() => neverResolves)])`
- * pattern, which leaked a permanently-pending promise per losing leg.
  */
 export interface Leg<T> {
   run: Promise<T>;
