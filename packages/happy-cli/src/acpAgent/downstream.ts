@@ -49,16 +49,10 @@ export function spawnDownstream(
   const { writable, readable } = nodeToWebStreams(child.stdin, child.stdout);
   const stream = ndJsonStream(writable, readable);
 
-  // `ClientSideConnection`'s constructor calls `toClient(this)` synchronously,
-  // *before* the `new ClientSideConnection(...)` expression finishes
-  // evaluating. That means an outer `let connection: ClientSideConnection`
-  // captured by this closure would still be `undefined` at call time -- the
-  // assignment to `connection` only happens after the constructor returns.
-  // The `agent` parameter the SDK passes in is `this` (the connection under
-  // construction, which implements `Agent`), so it's already the correct,
-  // fully-identity-equal object to hand to `makeClient`; only its own fields
-  // may still be settling, and none of that matters since `makeClient`'s
-  // returned `Client` methods only run later, once construction is complete.
+  // The SDK calls this factory synchronously during construction and passes in
+  // the connection itself (as `Agent`), so we hand that straight to
+  // `makeClient` rather than capturing an outer `let` that wouldn't be assigned
+  // yet. Its `Client` methods only run later, once construction is complete.
   const connection: ClientSideConnection = new ClientSideConnection(
     (agent) => makeClient(agent as ClientSideConnection),
     stream,

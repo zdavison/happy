@@ -9,7 +9,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import type { SessionUpdate, RequestPermissionRequest, PermissionOption } from '@agentclientprotocol/sdk';
-import { sessionUpdateToEnvelopes, extractPermissionRequestInput, permissionResultToOutcome } from './phoneRelay';
+import { sessionUpdateToEnvelopes } from './phoneRelay';
+import { extractPermissionRequestInput, permissionResultToOutcome } from '@/agent/acp/acpPermissionMapping';
 
 describe('sessionUpdateToEnvelopes', () => {
   it('maps agent_message_chunk text to a text envelope', () => {

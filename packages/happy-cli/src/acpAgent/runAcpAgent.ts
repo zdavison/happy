@@ -44,6 +44,7 @@ import { HappyProxyAgent, HappyProxyClient, type ProxyTaps } from './proxy';
 import { spawnDownstream } from './downstream';
 import { PhoneRelay } from './phoneRelay';
 import { createPromptSerializer } from './promptSerializer';
+import { raceFirstSuccessful } from './raceFirstSuccessful';
 import { logger } from '@/ui/logger';
 
 /**
@@ -71,10 +72,10 @@ export async function runAcpAgent(opts: {
   // prompts to the same session Zed established.
   let currentDownstreamSessionId: string | null = null;
 
-  // `zed` is constructed last but referenced by the (lazy) getter passed to
-  // `HappyProxyClient` below. The getter is only invoked once a message
-  // arrives, which is strictly after `zed` is assigned — so the non-null
-  // assertion is safe. See the construction-ordering note further down.
+  // The SDK connections form a reference cycle
+  // (zed → proxyAgent → downstream → proxyClient → zed). `zed` is the single
+  // link that must be assigned last; the getters that read it are only invoked
+  // once a downstream message arrives, well after assignment.
   let zed!: AgentSideConnection;
 
   const taps: ProxyTaps = {
@@ -84,38 +85,26 @@ export async function runAcpAgent(opts: {
     },
     onPrompt: () => relay.startTurn(),
     onSessionUpdate: (note) => relay.pushUpdate(note),
-    // A Zed-initiated prompt turn ends when the downstream `prompt` call
-    // resolves; `HappyProxyAgent.prompt` fires this after forwarding. This is
-    // the one cleanly-detectable turn-end signal, so we drive `endTurn` here
-    // rather than trying to infer it from the update stream.
-    onPromptDone: () => relay.endTurn('completed'),
+    // Turn-end is driven explicitly from the `prompt` overrides below (in a
+    // finally), so a failed downstream turn still closes the phone turn.
   };
-
-  // --- Construction ordering (mutual references are all lazy getters) ---------
-  // 1. proxyClient  (references `zed` lazily via `() => zed`)
-  // 2. spawnDownstream  (assigns `spawned.connection`; ClientSideConnection's
-  //    ctor calls makeClient SYNCHRONOUSLY, handing back proxyClient — which
-  //    only dereferences `zed` later, when a downstream Client call arrives)
-  // 3. proxyAgent  (references `spawned.connection` lazily via `() => ...`)
-  // 4. zed = new AgentSideConnection(() => proxyAgent, ...)  (factory called
-  //    SYNCHRONOUSLY, but proxyAgent already exists by now)
 
   const proxyClient = new HappyProxyClient(() => zed, taps);
 
-  // 3-party permission race, first-answer-wins. Forward the downstream's
-  // permission request to BOTH Zed and the phone and return whichever answers
-  // first. A rejected leg must NOT win the race, so each leg is guarded to
-  // never resolve on rejection (it hangs instead). The losing leg's request is
-  // left outstanding — an accepted Phase-1 leak (no cross-cancel of the loser).
-  proxyClient.requestPermission = (params) => {
-    const zedLeg = zed
-      .requestPermission(params)
-      .catch(() => new Promise<RequestPermissionResponse>(() => {}));
-    const phoneLeg = relay
-      .requestPermission(params)
-      .catch(() => new Promise<RequestPermissionResponse>(() => {}));
-    return Promise.race([zedLeg, phoneLeg]);
-  };
+  // 3-party permission race, first-successful-answer wins: the downstream's
+  // permission request is fanned out to BOTH Zed and the phone. If Zed answers
+  // first, the still-pending phone prompt is cancelled via `onLose`. (The
+  // reverse — cancelling Zed's native prompt when the phone wins — isn't
+  // exposed by the ACP SDK, so that leg simply settles when the user dismisses
+  // it; it no longer leaks a promise as the old `Promise.race` version did.)
+  proxyClient.requestPermission = (params) =>
+    raceFirstSuccessful<RequestPermissionResponse>([
+      { run: zed.requestPermission(params) },
+      {
+        run: relay.requestPermission(params),
+        onLose: () => relay.cancelPermission(params, 'Answered in editor'),
+      },
+    ]);
 
   const spawned = spawnDownstream(
     { command: opts.command, args: opts.args, cwd: process.cwd() },
@@ -136,16 +125,20 @@ export async function runAcpAgent(opts: {
   // until the previous one has settled.
   const serializedPrompt = createPromptSerializer((p: PromptRequest) => spawned.connection.prompt(p));
 
-  // Route Zed's prompts through the serializer too, preserving the exact tap
-  // behaviour `HappyProxyAgent.prompt` normally provides (see proxy.ts):
-  // `onPrompt` before forwarding, `onPromptDone` after the downstream call
-  // resolves -- the latter is what drives `relay.endTurn('completed')` for
-  // Zed-initiated turns, so it must not be dropped here.
+  // Route Zed's prompts through the serializer. `onPrompt` opens the phone turn
+  // before forwarding; `endTurn` runs in a finally so the turn is closed on
+  // both success and downstream failure (a rejected turn reports 'failed').
   proxyAgent.prompt = async (p) => {
     taps.onPrompt?.(p);
-    const res = await serializedPrompt(p);
-    taps.onPromptDone?.(p.sessionId);
-    return res;
+    let status: 'completed' | 'failed' = 'completed';
+    try {
+      return await serializedPrompt(p);
+    } catch (error) {
+      status = 'failed';
+      throw error;
+    } finally {
+      relay.endTurn(status);
+    }
   };
 
   const { writable, readable } = nodeToWebStreams(process.stdout, process.stdin);
@@ -159,7 +152,10 @@ export async function runAcpAgent(opts: {
     }
     void serializedPrompt({ sessionId: currentDownstreamSessionId, prompt: [{ type: 'text', text }] })
       .then(() => relay.endTurn('completed'))
-      .catch((e) => logger.debug('[acp-agent] phone prompt failed', e));
+      .catch((e) => {
+        logger.debug('[acp-agent] phone prompt failed', e);
+        relay.endTurn('failed');
+      });
   });
 
   // Stay alive until the Zed connection closes, then tear down.
