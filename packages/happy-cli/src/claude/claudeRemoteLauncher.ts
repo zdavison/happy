@@ -286,7 +286,13 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
         // actually changes (e.g., new session started or /clear command used).
         // See: https://github.com/anthropics/happy-cli/issues/143
         let previousSessionId: string | null = null;
-        while (!exitReason) {
+        // Also exit when the queue is closed: `nextMessage` returns null and
+        // `claudeRemote` returns, so without this the loop would busy-spin
+        // relaunching forever. Between turns the queue is empty-but-OPEN and
+        // `waitForMessagesAndGetAsString` blocks (never returns null), so a
+        // closed queue only ever means teardown — making closed→exit correct for
+        // the `happy claude` path too (and fixing a pre-existing latent spin).
+        while (!exitReason && !session.queue.isClosed()) {
             logger.debug('[remote]: launch');
             messageBuffer.addMessage('═'.repeat(40), 'status');
 

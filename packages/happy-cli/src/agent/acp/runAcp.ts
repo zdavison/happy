@@ -3,7 +3,9 @@ import { join } from 'node:path';
 import { ApiClient } from '@/api/api';
 import type { ApiSessionClient } from '@/api/apiSession';
 import type { AgentMessage } from '@/agent/core';
-import { AcpBackend, type AcpPermissionHandler } from './AcpBackend';
+import { AcpBackend } from './AcpBackend';
+import { GenericAcpPermissionHandler } from './genericAcpPermissionHandler';
+import { resolveSessionFlavor } from './acpSessionFlavor';
 import { DefaultTransport } from '@/agent/transport';
 import { AcpSessionManager } from './AcpSessionManager';
 import type { SessionEnvelope } from '@slopus/happy-wire';
@@ -19,7 +21,6 @@ import { encodeBase64 } from '@/api/encryption';
 import { registerKillSessionHandler } from '@/claude/registerKillSessionHandler';
 import { startHappyServer } from '@/claude/utils/startHappyServer';
 import { projectPath } from '@/projectPath';
-import { BasePermissionHandler, type PermissionResult } from '@/utils/BasePermissionHandler';
 import { connectionState } from '@/utils/serverConnectionErrors';
 import {
   extractConfigOptionsFromPayload,
@@ -404,47 +405,11 @@ function resolveRequestedLegacyModelCode(models: SessionModelState, requested: s
   return null;
 }
 
-class GenericAcpPermissionHandler extends BasePermissionHandler implements AcpPermissionHandler {
-  private readonly logPrefix: string;
-
-  constructor(session: ApiSessionClient, agentName: string) {
-    super(session);
-    this.logPrefix = `[${agentName}]`;
-  }
-
-  protected getLogPrefix(): string {
-    return this.logPrefix;
-  }
-
-  async handleToolCall(toolCallId: string, toolName: string, input: unknown): Promise<PermissionResult> {
-    return new Promise<PermissionResult>((resolve, reject) => {
-      this.pendingRequests.set(toolCallId, {
-        resolve,
-        reject,
-        toolName,
-        input,
-      });
-      this.addPendingRequestToState(toolCallId, toolName, input);
-      logger.debug(`${this.logPrefix} Permission request sent for tool: ${toolName} (${toolCallId})`);
-    });
-  }
-}
-
 type PendingTurn = {
   resolve: () => void;
   reject: (err: Error) => void;
   timeout: NodeJS.Timeout;
 };
-
-function resolveSessionFlavor(agentName: string): 'gemini' | 'opencode' | 'acp' {
-  if (agentName === 'gemini') {
-    return 'gemini';
-  }
-  if (agentName === 'opencode') {
-    return 'opencode';
-  }
-  return 'acp';
-}
 
 export async function runAcp(opts: {
   credentials: Credentials;
