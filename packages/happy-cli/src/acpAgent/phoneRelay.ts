@@ -3,10 +3,8 @@
  *
  * Maps a raw ACP `SessionUpdate` directly into Happy `SessionEnvelope`s for
  * the phone, without going through Happy's internal `AgentMessage` layer.
- * This is a pure, best-effort mapping — it only handles the four core
- * variants exercised by the ACP proxy (text/thinking chunks and tool-call
- * start/end); everything else maps to `[]` and is left for the enrichment
- * done in later phases.
+ * This is a pure, best-effort mapping — see `sessionUpdateToEnvelopes` for the
+ * exact list of what is covered today and what remains for future enrichment.
  *
  * Mirrors the envelope shapes built by `AcpSessionManager`
  * (`src/agent/acp/AcpSessionManager.ts`), which remains the source of truth
@@ -67,6 +65,21 @@ function toArgsRecord(rawInput: unknown): Record<string, unknown> {
 /**
  * Maps a raw ACP `SessionUpdate` into zero or more Happy `SessionEnvelope`s
  * for the phone. Pure function: no I/O, no console output.
+ *
+ * Covered today (ACP tier):
+ *  - `agent_message_chunk` / `agent_thought_chunk` — `text` content only.
+ *  - `tool_call` — title + args (as `tool-call-start`).
+ *  - `tool_call_update` — terminal `completed`/`failed` status (as `tool-call-end`).
+ *
+ * Everything else maps to `[]` today and is the remaining enrichment work:
+ *  - Non-`text` content blocks (`image`, `audio`, `resource`, `resource_link`)
+ *    inside message/thought chunks.
+ *  - `tool_call_update` with non-terminal status: streamed tool output, diffs,
+ *    and status/label changes mid-call.
+ *  - Richer `tool_call` fields: `kind`, `locations`, `content`/diffs, `rawOutput`.
+ *  - Other update variants: `user_message_chunk`, `plan`,
+ *    `available_commands_update`, `current_mode_update`, `config_option_update`,
+ *    `session_info_update`, `usage_update`.
  */
 export function sessionUpdateToEnvelopes(update: SessionUpdate, turnId: string | null): SessionEnvelope[] {
   switch (update.sessionUpdate) {
@@ -116,7 +129,7 @@ type HappyServerHandle = Awaited<ReturnType<typeof startHappyServer>>;
  *    and maps the ACP request/response via `acpPermissionMapping`.
  *
  * The tap-facing methods (`startTurn`/`pushUpdate`/`endTurn`) never throw — a
- * relay hiccup must not abort the Zed↔downstream forward path.
+ * relay hiccup must not abort the upstream↔downstream forward path.
  */
 export class PhoneRelay {
   private turnId: string | null = null;
@@ -264,8 +277,8 @@ export class PhoneRelay {
 
   /**
    * Cancel a still-pending phone permission prompt — used when another party
-   * (e.g. Zed) has already answered the same request. Non-throwing (may be
-   * called from a race-cleanup path).
+   * (e.g. the upstream editor/UI) has already answered the same request.
+   * Non-throwing (may be called from a race-cleanup path).
    */
   cancelPermission(request: RequestPermissionRequest, reason: string): void {
     try {

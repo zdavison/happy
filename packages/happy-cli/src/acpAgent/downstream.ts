@@ -1,12 +1,12 @@
 /**
  * downstream.ts - Spawn the downstream ACP agent and wire an ACP connection to it.
  *
- * The Happy ACP proxy sits between an ACP-speaking editor (e.g. Zed, talking
- * to us as its "agent" over our own stdio) and a real, user-provided coding
- * agent that itself speaks ACP (the "downstream agent"). This module owns the
- * downstream half: spawn the downstream agent as a child process and build a
- * `ClientSideConnection` over its stdio, so we can act as *its* client the
- * same way an editor would.
+ * The Happy ACP proxy sits between an ACP-speaking client — a code editor or
+ * UI (e.g. Zed) that talks to us as its "agent" over our own stdio — and a
+ * real, user-provided coding agent that itself speaks ACP (the "downstream
+ * agent"). This module owns the downstream half: spawn the downstream agent as
+ * a child process and build a `ClientSideConnection` over its stdio, so we can
+ * act as *its* client the same way an editor/UI would.
  *
  * Mirrors the process spawn + stream wiring in `src/agent/acp/AcpBackend.ts`
  * (`spawn(..., { stdio: ['pipe', 'pipe', 'pipe'] })` and its
@@ -30,7 +30,7 @@ export function spawnDownstream(
     cwd: cfg.cwd,
     // Use 'pipe' for all stdio: we speak JSON-RPC over stdin/stdout and must
     // never let the downstream agent's own stdout/stderr leak to our stdout,
-    // since in `acp-agent` mode our stdout is the upstream Zed JSON-RPC channel.
+    // since in `acp-agent` mode our stdout is the upstream ACP client's JSON-RPC channel.
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 

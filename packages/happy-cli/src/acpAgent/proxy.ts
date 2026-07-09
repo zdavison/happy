@@ -1,19 +1,23 @@
 /**
  * Bidirectional ACP proxy forwarders.
  *
- * `HappyProxyAgent` implements the ACP `Agent` interface that Zed (or any
- * ACP-speaking editor) talks to. Every call is forwarded verbatim down to the
- * downstream `ClientSideConnection` -- the real coding agent being proxied.
+ * The upstream side is any ACP-speaking client — a code editor or UI such as
+ * Zed, Neovim, or a custom app. Nothing here is specific to Zed; "upstream"
+ * always means whatever ACP client spawned us.
+ *
+ * `HappyProxyAgent` implements the ACP `Agent` interface that the upstream
+ * client talks to. Every call is forwarded verbatim down to the downstream
+ * `ClientSideConnection` -- the real coding agent being proxied.
  *
  * `HappyProxyClient` implements the ACP `Client` interface that the
- * downstream agent talks to. Every call is forwarded verbatim up to Zed's
- * `AgentSideConnection`.
+ * downstream agent talks to. Every call is forwarded verbatim up to the
+ * upstream client's `AgentSideConnection`.
  *
  * Both classes accept a `ProxyTaps` object: side-observer callbacks fired
  * alongside the forwarded calls so the phone relay and permission-race layers
- * (later tasks) can observe traffic without altering it. Taps are pure
- * observers -- they never reshape params or responses, and the proxy classes
- * have no knowledge of what (if anything) consumes them.
+ * can observe traffic without altering it. Taps are pure observers -- they
+ * never reshape params or responses, and the proxy classes have no knowledge
+ * of what (if anything) consumes them.
  */
 import type {
   Agent, Client, AgentSideConnection, ClientSideConnection,
@@ -40,9 +44,9 @@ export interface ProxyTaps {
 }
 
 /**
- * Forwards every call Zed makes (as the ACP `Agent`) down to the downstream
- * `ClientSideConnection`. Raw pass-through: params and responses are forwarded
- * verbatim, never reshaped -- taps observe only.
+ * Forwards every call the upstream client makes (as the ACP `Agent`) down to
+ * the downstream `ClientSideConnection`. Raw pass-through: params and responses
+ * are forwarded verbatim, never reshaped -- taps observe only.
  */
 export class HappyProxyAgent implements Agent {
   constructor(
@@ -114,36 +118,36 @@ export class HappyProxyAgent implements Agent {
 
 /**
  * Forwards every call the downstream agent makes (as the ACP `Client`) up to
- * Zed's `AgentSideConnection`. Raw pass-through: params and responses are
- * forwarded verbatim, never reshaped -- taps observe only.
+ * the upstream client's `AgentSideConnection`. Raw pass-through: params and
+ * responses are forwarded verbatim, never reshaped -- taps observe only.
  *
- * `requestPermission` is intentionally simple here: it forwards to Zed and
+ * `requestPermission` is intentionally simple here: it forwards upstream and
  * fires the `onRequestPermission` tap. The 3-party first-wins race (phone /
- * Zed / auto-approve) is layered on top in a later task by replacing this
- * with a real racer -- do not build that here.
+ * upstream / auto-approve) is layered on top in `runAcpAgent.ts` by replacing
+ * this method with a real racer -- it is deliberately not built here.
  */
 export class HappyProxyClient implements Client {
   constructor(
-    private readonly getZed: () => AgentSideConnection,
+    private readonly getUpstream: () => AgentSideConnection,
     private readonly taps: ProxyTaps,
   ) {}
 
   async sessionUpdate(params: SessionNotification): Promise<void> {
     this.taps.onSessionUpdate?.(params);
-    await this.getZed().sessionUpdate(params);
+    await this.getUpstream().sessionUpdate(params);
   }
 
   requestPermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
     this.taps.onRequestPermission?.(params);
-    return this.getZed().requestPermission(params);
+    return this.getUpstream().requestPermission(params);
   }
 
   readTextFile(params: ReadTextFileRequest): Promise<ReadTextFileResponse> {
-    return this.getZed().readTextFile(params);
+    return this.getUpstream().readTextFile(params);
   }
 
   writeTextFile(params: WriteTextFileRequest): Promise<WriteTextFileResponse> {
-    return this.getZed().writeTextFile(params);
+    return this.getUpstream().writeTextFile(params);
   }
 
   async createTerminal(params: CreateTerminalRequest): Promise<CreateTerminalResponse> {
@@ -152,15 +156,15 @@ export class HappyProxyClient implements Client {
     // a plain CreateTerminalResponse. The Client interface's createTerminal
     // must return { terminalId }, so we unwrap the handle's id here. Terminal
     // output/wait/kill/release ops are NOT forwarded (see note below).
-    const handle = await this.getZed().createTerminal(params);
+    const handle = await this.getUpstream().createTerminal(params);
     return { terminalId: handle.id };
   }
 
   extMethod(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
-    return this.getZed().extMethod(method, params);
+    return this.getUpstream().extMethod(method, params);
   }
 
   extNotification(method: string, params: Record<string, unknown>): Promise<void> {
-    return this.getZed().extNotification(method, params);
+    return this.getUpstream().extNotification(method, params);
   }
 }

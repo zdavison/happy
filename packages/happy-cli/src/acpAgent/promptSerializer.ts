@@ -5,8 +5,9 @@
  *
  * Used to enforce "one turn in flight" on the downstream ACP `prompt` call.
  * `runAcpAgent.ts` has two independent sources that can call
- * `spawned.connection.prompt` -- Zed (via `HappyProxyAgent.prompt`) and the
- * phone (via `relay.onUserMessage`) -- with no coordination between them.
+ * `spawned.connection.prompt` -- the upstream ACP client (via
+ * `HappyProxyAgent.prompt`) and the phone (via `relay.onUserMessage`) -- with
+ * no coordination between them.
  * Wrapping the shared `prompt` call with this serializer guarantees the
  * downstream agent never sees two concurrent prompts, regardless of which
  * side triggered them.
